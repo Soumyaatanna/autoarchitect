@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+gitpython
+pydantic
+openai
+networkx
+python-dotenv
+httpx
+google-generativeai
