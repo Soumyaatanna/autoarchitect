@@ -6,29 +6,44 @@ from typing import Dict, Any
 
 # Client wrapper
 def get_llm_provider():
-    gemini_key = os.getenv("GEMINI_API_KEY")
+    """Return (provider_name, client) based on available API keys.
+
+    - Prefers Gemini (GEMINI_API_KEY or GOOGLE_API_KEY)
+    - Falls back to OpenAI (OPENAI_API_KEY)
+    - Gemini model names are configurable via env:
+      GEMINI_MODEL (default: gemini-1.5-flash-latest)
+    """
+
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
-    
+
     if gemini_key:
         genai.configure(api_key=gemini_key)
-        return "gemini", genai.GenerativeModel('models/gemini-1.5-flash')
+        # The SDK expects full model IDs like "models/gemini-flash-latest".
+        # Default to a general-purpose flash model that supports generateContent.
+        model_name = os.getenv("GEMINI_MODEL", "models/gemini-flash-latest")
+        return "gemini", genai.GenerativeModel(model_name)
     elif openai_key:
         return "openai", OpenAI(api_key=openai_key)
     else:
         return None, None
 
 def call_gemini_with_fallback(client, prompt):
+    """Call Gemini, falling back to a secondary model if the primary is unsupported."""
     try:
         return client.generate_content(prompt).text
     except Exception as e:
-        if "404" in str(e) or "not found" in str(e).lower():
-            print(f"DEBUG: Primary model failed ({e}). Retrying with gemini-1.5-pro...")
+        msg = str(e)
+        if "404" in msg or "not found" in msg.lower():
+            fallback_name = os.getenv("GEMINI_FALLBACK_MODEL", "models/gemini-pro-latest")
+            print(f"DEBUG: Primary model failed ({e}). Retrying with {fallback_name} ...")
             try:
-                fallback_client = genai.GenerativeModel('models/gemini-1.5-pro')
+                fallback_client = genai.GenerativeModel(fallback_name)
                 return fallback_client.generate_content(prompt).text
             except Exception as e2:
                 print(f"DEBUG: Fallback model failed: {e2}")
-                raise e # Return original error if fallback fails
+                # Propagate original error so the UI shows the first failure.
+                raise e
         raise e
 
 def generate_architecture_summary(graph_data: Dict[str, Any]) -> str:

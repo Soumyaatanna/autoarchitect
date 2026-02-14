@@ -16,7 +16,7 @@ app = FastAPI(title="AutoArchitect API", description="GenAI-powered Repo Archite
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Allow frontend origin
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # Allow frontend origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,9 +39,12 @@ def process_repo_task(job_id: str, repo_url: str, github_token: Optional[str]):
     try:
         jobs[job_id]["status"] = "processing"
         
+        # Use provided token or fall back to environment variable
+        token = github_token or os.getenv("GITHUB_TOKEN")
+        
         # 1. Deterministic Analysis
         print(f"[{job_id}] Starting analysis for {repo_url}")
-        graph_data = analyze_repo(repo_url, github_token)
+        graph_data = analyze_repo(repo_url, token)
         
         # 2. GenAI Reasoning
         print(f"[{job_id}] Generating summary and diagrams")
