@@ -11,11 +11,25 @@ def get_llm_provider():
     
     if gemini_key:
         genai.configure(api_key=gemini_key)
-        return "gemini", genai.GenerativeModel('gemini-1.5-flash')
+        return "gemini", genai.GenerativeModel('models/gemini-1.5-flash')
     elif openai_key:
         return "openai", OpenAI(api_key=openai_key)
     else:
         return None, None
+
+def call_gemini_with_fallback(client, prompt):
+    try:
+        return client.generate_content(prompt).text
+    except Exception as e:
+        if "404" in str(e) or "not found" in str(e).lower():
+            print(f"DEBUG: Primary model failed ({e}). Retrying with gemini-1.5-pro...")
+            try:
+                fallback_client = genai.GenerativeModel('models/gemini-1.5-pro')
+                return fallback_client.generate_content(prompt).text
+            except Exception as e2:
+                print(f"DEBUG: Fallback model failed: {e2}")
+                raise e # Return original error if fallback fails
+        raise e
 
 def generate_architecture_summary(graph_data: Dict[str, Any]) -> str:
     print("DEBUG: Generating Summary...")
@@ -25,21 +39,31 @@ def generate_architecture_summary(graph_data: Dict[str, Any]) -> str:
         print("DEBUG: No API Key found. Returning Mock Summary.")
         return "## Analysis Simulation (Fallback)\n\n**Note:** Real-time generation failed (Missing API Keys). Showing a simulated summary.\n\nPlease set `GEMINI_API_KEY` or `OPENAI_API_KEY` in `.env`."
 
-    repo_context = json.dumps(graph_data, indent=2)[:5000]
+    # Prepare prompt with raw file contents
+    # graph_data now contains {"repo": ..., "files": [{"path": ..., "content": ...}]}
+    
+    file_context = ""
+    if "files" in graph_data:
+        for f in graph_data["files"]:
+            file_context += f"File: {f['path']}\n```\n{f['content']}\n```\n\n"
+    else:
+        # Fallback if old format
+        file_context = json.dumps(graph_data, indent=2)
+            
+    repo_context = file_context[:50000] # Increase limit since we are sending code. Gemini 1.5 has large window.
     
     system_prompt = """You are a Principal Software Architect. 
-    Analyze the provided JSON representation of a codebase.
+    Analyze the provided source code of a repository.
     Construct a high-level architectural summary.
-    Identify pattern, key components, and data flow.
+    Identify patterns, key components, and data flow.
     Output concise Markdown."""
 
-    full_prompt = f"{system_prompt}\n\nRepository Data:\n{repo_context}"
+    full_prompt = f"{system_prompt}\n\nRepository Source Code:\n{repo_context}"
 
     try:
         if provider == "gemini":
             print("DEBUG: Using Gemini...")
-            response = client.generate_content(full_prompt)
-            return response.text
+            return call_gemini_with_fallback(client, full_prompt)
         else:
             # OpenAI
             response = client.chat.completions.create(
@@ -63,20 +87,28 @@ def generate_mermaid(graph_data: Dict[str, Any]) -> str:
         print("DEBUG: No API Key found. Returning Mock Diagram.")
         return get_mock_mermaid()
 
-    repo_context = json.dumps(graph_data, indent=2)[:5000]
+    # Prepare prompt with raw file contents
+    file_context = ""
+    if "files" in graph_data:
+        for f in graph_data["files"]:
+            file_context += f"File: {f['path']}\n```\n{f['content']}\n```\n\n"
+    else:
+        file_context = json.dumps(graph_data, indent=2)
+            
+    repo_context = file_context[:50000]
     
     system_prompt = """You are an expert in Mermaid.js diagram generation.
-    Create a detailed Architecture diagram.
+    Create a detailed Architecture diagram based on the source code.
+    Use subgraphs for modules/folders.
     Return ONLY the Mermaid code block (no markdown fences if possible, or inside ```mermaid)."""
 
-    full_prompt = f"{system_prompt}\n\nRepository Data:\n{repo_context}"
+    full_prompt = f"{system_prompt}\n\nRepository Source Code:\n{repo_context}"
 
     try:
         content = ""
         if provider == "gemini":
             print("DEBUG: Using Gemini...")
-            response = client.generate_content(full_prompt)
-            content = response.text
+            content = call_gemini_with_fallback(client, full_prompt)
         else:
             # OpenAI
             response = client.chat.completions.create(
