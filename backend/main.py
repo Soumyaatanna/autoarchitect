@@ -14,9 +14,23 @@ load_dotenv()
 app = FastAPI(title="AutoArchitect API", description="GenAI-powered Repo Architecture Analyzer")
 
 # Configure CORS
+# In dev we allow localhost ports; in prod we optionally read allowed origins
+# from FRONTEND_ORIGINS env var (comma-separated), e.g.
+# FRONTEND_ORIGINS="https://autoarchitect-1.onrender.com"
+default_origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+]
+
+frontend_origins_env = os.getenv("FRONTEND_ORIGINS")
+if frontend_origins_env:
+    allowed_origins = default_origins + [o.strip() for o in frontend_origins_env.split(",") if o.strip()]
+else:
+    allowed_origins = default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # Allow frontend origin
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
